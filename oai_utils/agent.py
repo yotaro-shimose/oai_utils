@@ -1,3 +1,5 @@
+from agents.models.openai_responses import OpenAIResponsesModel
+from openai._exceptions import BadRequestError
 import asyncio
 from asyncio import timeout
 from dataclasses import dataclass
@@ -23,7 +25,9 @@ from pydantic import BaseModel
 
 from oai_wrapper.runresult import RunResultWrapper
 
-type AgentsSDKModel = str | OpenAIChatCompletionsModel
+from agents.extensions.models.litellm_model import LitellmModel
+
+type AgentsSDKModel = str | OpenAIChatCompletionsModel | LitellmModel
 
 
 class AgentRunFailure(BaseException):
@@ -36,6 +40,7 @@ class AgentRunFailure(BaseException):
             "MaxTurnsExceeded",
             "UserError",
             "ContextWindowExceededError",
+            "BadRequestError",
         ],
     ):
         super().__init__(message)
@@ -60,7 +65,9 @@ class AgentWrapper[TOutput: BaseModel | str]:
         | StopAtTools
         | ToolsToFinalOutputFunction = "run_llm_again",
     ) -> Self:
-        if isinstance(model, (str, OpenAIChatCompletionsModel)):
+        if isinstance(
+            model, (str, OpenAIChatCompletionsModel, LitellmModel, OpenAIResponsesModel)
+        ):
             agents_sdk_model = model
         else:
             raise ValueError("Unsupported model type")
@@ -99,25 +106,27 @@ class AgentWrapper[TOutput: BaseModel | str]:
             raise AgentRunFailure(
                 str(e),
                 cause="Timeout",
-            )
+            ) from e
         except ModelBehaviorError as e:
             raise AgentRunFailure(
                 str(e),
                 cause="ModelBehaviourError",
-            )
+            ) from e
         except MaxTurnsExceeded as e:
             raise AgentRunFailure(
                 str(e),
                 cause="MaxTurnsExceeded",
-            )
+            ) from e
         except UserError as e:
             raise AgentRunFailure(
                 str(e),
                 cause="UserError",
-            )
+            ) from e
         except ContextWindowExceededError as e:
             raise AgentRunFailure(
                 str(e),
                 cause="ContextWindowExceededError",
-            )
+            ) from e
+        except BadRequestError as e:
+            raise AgentRunFailure(str(e), cause="BadRequestError") from e
         return RunResultWrapper[type(result.final_output)](result=result)
