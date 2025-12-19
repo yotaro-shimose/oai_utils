@@ -1,0 +1,11 @@
+[project]
+name = "oai-utils"
+version = "0.1.0"
+description = "Plenty of snippets for OpenAI Agents SDK"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "litellm>=1.80.10",
+    "openai-agents>=0.6.3",
+    "pydantic>=2.12.5",
+]
