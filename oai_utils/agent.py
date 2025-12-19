@@ -85,7 +85,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
         *,
         context: Any | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
-        time_out_seconds: float = 120.0,
+        time_out_seconds: float | None = None,
     ) -> RunResultWrapper[TOutput]:
         try:
             async with timeout(time_out_seconds):
