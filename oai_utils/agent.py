@@ -1,5 +1,3 @@
-from agents.models.openai_responses import OpenAIResponsesModel
-from openai._exceptions import BadRequestError
 import asyncio
 from asyncio import timeout
 from dataclasses import dataclass
@@ -18,16 +16,19 @@ from agents import (
     TResponseInputItem,
     UserError,
 )
+from agents.extensions.models.litellm_model import LitellmModel
 from agents.mcp.server import MCPServer
+from agents.models.openai_responses import OpenAIResponsesModel
 from agents.run import DEFAULT_MAX_TURNS
 from litellm import ContextWindowExceededError
+from openai._exceptions import BadRequestError
 from pydantic import BaseModel
+from agents import Model
 
-from oai_wrapper.runresult import RunResultWrapper
+from oai_utils.runresult import RunResultWrapper
+from oai_utils.vllm import VLLMSetup
 
-from agents.extensions.models.litellm_model import LitellmModel
-
-type AgentsSDKModel = str | OpenAIChatCompletionsModel | LitellmModel
+type AgentsSDKModel = str | Model | VLLMSetup
 
 
 class AgentRunFailure(BaseException):
@@ -69,6 +70,8 @@ class AgentWrapper[TOutput: BaseModel | str]:
             model, (str, OpenAIChatCompletionsModel, LitellmModel, OpenAIResponsesModel)
         ):
             agents_sdk_model = model
+        elif isinstance(model, VLLMSetup):
+            agents_sdk_model = model.litellm_agentssdk_name().model_name
         else:
             raise ValueError("Unsupported model type")
         kwargs = {}
