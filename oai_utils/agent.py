@@ -1,3 +1,5 @@
+from abc import abstractmethod
+from abc import ABC
 import asyncio
 from asyncio import timeout
 from dataclasses import dataclass
@@ -26,9 +28,14 @@ from pydantic import BaseModel
 from agents import Model
 
 from oai_utils.runresult import RunResultWrapper
-from oai_utils.vllm import VLLMSetup
 
-type AgentsSDKModel = str | Model | VLLMSetup
+
+class AgentsSDKModelBase(ABC):
+    @abstractmethod
+    def as_sdkmodel(self) -> str | Model: ...
+
+
+type AgentsSDKModel = str | Model | AgentsSDKModelBase
 
 
 class AgentRunFailure(BaseException):
@@ -70,8 +77,8 @@ class AgentWrapper[TOutput: BaseModel | str]:
             model, (str, OpenAIChatCompletionsModel, LitellmModel, OpenAIResponsesModel)
         ):
             agents_sdk_model = model
-        elif isinstance(model, VLLMSetup):
-            agents_sdk_model = model.litellm_agentssdk_name().model_name
+        elif isinstance(model, AgentsSDKModelBase):
+            agents_sdk_model = model.as_sdkmodel()
         else:
             raise ValueError("Unsupported model type")
         kwargs = {}

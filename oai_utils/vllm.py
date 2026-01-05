@@ -1,8 +1,9 @@
+from oai_utils.agent import AgentsSDKModelBase
 import os
 import subprocess
 import time
 from typing import Self
-
+from agents import Model
 import httpx
 import torch
 from agents import OpenAIChatCompletionsModel
@@ -14,7 +15,7 @@ class LiteLLMModelName(BaseModel):
     model_name: str
 
 
-class VLLMSetup(BaseModel):
+class VLLMSetup(BaseModel, AgentsSDKModelBase):
     model: str
     lora_adapter: str | None = None
     port: int = 5222
@@ -167,3 +168,6 @@ class VLLMSetup(BaseModel):
         return LiteLLMModelName(
             model_name=f"litellm/{self.litellm_model(self.effective_model_name)}"
         )
+
+    def as_sdkmodel(self) -> Model | str:
+        return self.litellm_agentssdk_name().model_name
