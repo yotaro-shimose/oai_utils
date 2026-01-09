@@ -5,7 +5,12 @@ import time
 from typing import Self
 from agents import Model
 import httpx
-import torch
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
 from agents import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 from pydantic import BaseModel, InstanceOf
@@ -94,6 +99,10 @@ class VLLMSetup(BaseModel, AgentsSDKModelBase):
                 ]
             )
         if self.data_parallel_size is None:
+            if torch is None:
+                raise ImportError(
+                    "torch is not installed. Please install oai_utils[vllm] to use VLLMSetup."
+                )
             device_count = torch.cuda.is_available()
         else:
             device_count = self.data_parallel_size

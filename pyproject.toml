@@ -9,7 +9,14 @@ dependencies = [
     "litellm",
     "openai-agents",
     "pydantic",
+    "loguru",
     "openai>=1.99.1",
+]
+
+[project.optional-dependencies]
+vllm = [
+    "torch",
+    "vllm",
 ]
 
 [build-system]
