@@ -11,6 +11,7 @@ dependencies = [
     "pydantic",
     "loguru",
     "openai>=1.99.1",
+    "pillow>=12.1.0",
 ]
 
 [project.optional-dependencies]

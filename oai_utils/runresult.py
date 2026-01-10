@@ -6,6 +6,7 @@ from agents import (
     ReasoningItem,
     RunResult,
 )
+from agents.items import TResponseInputItem
 from loguru import logger
 from openai.types.responses.response_output_message import Content as MessageContent
 from openai.types.responses.response_reasoning_item import Content as ReasoningContent
@@ -88,3 +89,6 @@ class RunResultWrapper[TOutput]:
 
     def final_output(self) -> TOutput:
         return self.result.final_output
+
+    def to_input_list(self) -> list[TResponseInputItem]:
+        return self.result.to_input_list()

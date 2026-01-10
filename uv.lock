@@ -2454,6 +2454,7 @@ dependencies = [
     { name = "loguru" },
     { name = "openai" },
     { name = "openai-agents" },
+    { name = "pillow" },
     { name = "pydantic" },
 ]
 
@@ -2470,6 +2471,7 @@ requires-dist = [
     { name = "loguru" },
     { name = "openai", specifier = ">=1.99.1" },
     { name = "openai-agents" },
+    { name = "pillow", specifier = ">=12.1.0" },
     { name = "pydantic" },
     { name = "torch", marker = "extra == 'vllm'" },
     { name = "vllm", marker = "extra == 'vllm'" },

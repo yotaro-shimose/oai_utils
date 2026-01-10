@@ -1,13 +1,13 @@
-from abc import abstractmethod
-from abc import ABC
 import asyncio
+from abc import ABC, abstractmethod
 from asyncio import timeout
 from dataclasses import dataclass
-from typing import Any, Literal, Self, Sequence
+from typing import Any, Iterable, Literal, Self, Sequence
 
 from agents import (
     Agent,
     MaxTurnsExceeded,
+    Model,
     ModelBehaviorError,
     ModelSettings,
     OpenAIChatCompletionsModel,
@@ -25,7 +25,6 @@ from agents.run import DEFAULT_MAX_TURNS
 from litellm import ContextWindowExceededError
 from openai._exceptions import BadRequestError
 from pydantic import BaseModel
-from agents import Model
 
 from oai_utils.runresult import RunResultWrapper
 
@@ -98,17 +97,18 @@ class AgentWrapper[TOutput: BaseModel | str]:
 
     async def run(
         self,
-        input: str | list[TResponseInputItem],
+        input: str | Iterable[TResponseInputItem],
         *,
         context: Any | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         time_out_seconds: float | None = None,
     ) -> RunResultWrapper[TOutput]:
         try:
+            input_ = input if isinstance(input, str) else list(input)
             async with timeout(time_out_seconds):
                 result = await Runner.run(
                     self.agent,
-                    input=input,
+                    input=input_,
                     context=context,
                     max_turns=max_turns,
                 )
