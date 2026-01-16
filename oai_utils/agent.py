@@ -1,5 +1,4 @@
 import asyncio
-from abc import ABC, abstractmethod
 from asyncio import timeout
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Self, Sequence
@@ -29,12 +28,7 @@ from pydantic import BaseModel
 from oai_utils.runresult import RunResultWrapper
 
 
-class AgentsSDKModelBase(ABC):
-    @abstractmethod
-    def as_sdkmodel(self) -> str | Model: ...
-
-
-type AgentsSDKModel = str | Model | AgentsSDKModelBase
+type AgentsSDKModel = str | Model
 
 
 class AgentRunFailure(BaseException):
@@ -76,8 +70,6 @@ class AgentWrapper[TOutput: BaseModel | str]:
             model, (str, OpenAIChatCompletionsModel, LitellmModel, OpenAIResponsesModel)
         ):
             agents_sdk_model = model
-        elif isinstance(model, AgentsSDKModelBase):
-            agents_sdk_model = model.as_sdkmodel()
         else:
             raise ValueError("Unsupported model type")
         kwargs = {}

@@ -1,9 +1,9 @@
-from oai_utils.agent import AgentsSDKModelBase
-import os
+from agents.extensions.models.litellm_model import LitellmModel
+from pydantic import Field
+from pathlib import Path
 import subprocess
 import time
 from typing import Self
-from agents import Model
 import httpx
 
 try:
@@ -11,18 +11,13 @@ try:
 except ImportError:
     torch = None
 
-from agents import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 from pydantic import BaseModel, InstanceOf
 
 
-class LiteLLMModelName(BaseModel):
-    model_name: str
-
-
-class VLLMSetup(BaseModel, AgentsSDKModelBase):
+class VLLMSetup(BaseModel):
     model: str
-    lora_adapter: str | None = None
+    lora_adapters: dict[str, Path] = Field(default_factory=dict)
     port: int = 5222
     max_model_len: int = 32768
     api_key: str = "your_api_key_here"
@@ -83,14 +78,10 @@ class VLLMSetup(BaseModel, AgentsSDKModelBase):
             "--max-model-len",
             str(self.max_model_len),
         ]
-        if self.lora_adapter is not None:
-            commands.extend(
-                [
-                    "--enable-lora",
-                    "--lora-modules",
-                    f"sql-lora={self.lora_adapter}",
-                ]
-            )
+        if self.lora_adapters:
+            commands.extend(["--enable-lora", "--lora-modules"])
+            for adapter_name, adapter_path in self.lora_adapters.items():
+                commands.append(f"{adapter_name}={adapter_path}")
         if self.reasoning_parser is not None:
             commands.extend(
                 [
@@ -152,31 +143,22 @@ class VLLMSetup(BaseModel, AgentsSDKModelBase):
             api_key=self.api_key,
         )
 
-    @classmethod
-    def litellm_model(cls, model: str) -> str:
-        return f"hosted_vllm/{model}"
-
     @property
-    def effective_model_name(self) -> str:
+    def effective_model_name(self, lora: str | None = None) -> str:
         """Returns the adapter name if LoRA is used, otherwise the base model."""
-        if self.lora_adapter is not None:
-            return "sql-lora"
+        if lora is not None:
+            return lora
         return self.model
 
-    def chat_completions_model(self) -> OpenAIChatCompletionsModel:
-        return OpenAIChatCompletionsModel(
-            # Use effective_model_name instead of self.model
-            model=self.litellm_model(self.effective_model_name),
-            openai_client=self.get_openai_client(),
-        )
+    def litellm_model(self, lora: str | None = None) -> str:
+        if lora is not None:
+            return f"openai/{lora}"
+        return f"openai/{self.model}"
 
-    def litellm_agentssdk_name(self) -> LiteLLMModelName:
-        os.environ["HOSTED_VLLM_API_BASE"] = f"{self.base_url}/v1"
-        os.environ["HOSTED_VLLM_API_KEY"] = self.api_key
+    def as_litellm_model(self, lora: str | None = None) -> LitellmModel:
         # Use effective_model_name here as well
-        return LiteLLMModelName(
-            model_name=f"litellm/{self.litellm_model(self.effective_model_name)}"
+        return LitellmModel(
+            model=self.litellm_model(lora),
+            base_url=f"{self.base_url}/v1",
+            api_key=self.api_key,
         )
-
-    def as_sdkmodel(self) -> Model | str:
-        return self.litellm_agentssdk_name().model_name
