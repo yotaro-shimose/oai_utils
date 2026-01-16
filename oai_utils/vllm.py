@@ -3,8 +3,9 @@ from pydantic import Field
 from pathlib import Path
 import subprocess
 import time
-from typing import Self
+from typing import Self, Any
 import httpx
+import json
 
 try:
     import torch
@@ -13,6 +14,12 @@ except ImportError:
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, InstanceOf
+
+
+class RopeScaling(BaseModel):
+    rope_type: str = "yarn"
+    factor: float
+    original_max_position_embeddings: int
 
 
 class VLLMSetup(BaseModel):
@@ -24,6 +31,8 @@ class VLLMSetup(BaseModel):
     vllm_process: InstanceOf[subprocess.Popen | None] = None
     data_parallel_size: int | None = None
     reasoning_parser: str | None = None
+    rope_scaling: RopeScaling | None = Field(default=None)
+    quantization: str | None = Field(default=None)
 
     @classmethod
     def qwen3(cls, **kwargs) -> Self:
@@ -66,6 +75,9 @@ class VLLMSetup(BaseModel):
                 return False
 
     def launch_vllm_server(self) -> subprocess.Popen:
+        yarn_scaling = (
+            self.rope_scaling.factor if self.rope_scaling is not None else 1.0
+        )
         commands: list[str] = [
             "vllm",
             "serve",
@@ -76,7 +88,7 @@ class VLLMSetup(BaseModel):
             "--tool-call-parser",
             "hermes",
             "--max-model-len",
-            str(self.max_model_len),
+            str(int(self.max_model_len * yarn_scaling)),
         ]
         if self.lora_adapters:
             commands.extend(["--enable-lora", "--lora-modules"])
@@ -106,6 +118,18 @@ class VLLMSetup(BaseModel):
                     f"{256 * device_count}",
                 ]
             )
+        if self.quantization:
+            commands.extend(
+                [
+                    "--quantization",
+                    self.quantization,
+                ]
+            )
+        if self.rope_scaling:
+            hf_overrides = {
+                "rope_parameters": self.rope_scaling.model_dump(),
+            }
+            commands.extend(["--hf-overrides", json.dumps(hf_overrides)])
         vllm_process = subprocess.Popen(commands)
         self.vllm_process = vllm_process
         return vllm_process
