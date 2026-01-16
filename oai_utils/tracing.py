@@ -23,7 +23,7 @@ class AgentContentPrinter(TracingProcessor):
 
     Example:
         from agents.tracing import add_trace_processor
-        from openhands_agent.tracing import AgentContentPrinter
+        from oai_utils.tracing import AgentContentPrinter
 
         add_trace_processor(AgentContentPrinter())
     """
