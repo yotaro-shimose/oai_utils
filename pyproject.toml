@@ -12,6 +12,7 @@ dependencies = [
     "loguru",
     "openai>=1.99.1",
     "pillow",
+    "tqdm",
 ]
 
 [project.optional-dependencies]

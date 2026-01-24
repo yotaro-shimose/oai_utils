@@ -2456,6 +2456,7 @@ dependencies = [
     { name = "openai-agents" },
     { name = "pillow" },
     { name = "pydantic" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -2471,9 +2472,10 @@ requires-dist = [
     { name = "loguru" },
     { name = "openai", specifier = ">=1.99.1" },
     { name = "openai-agents" },
-    { name = "pillow", specifier = ">=12.1.0" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "torch", marker = "extra == 'vllm'" },
+    { name = "tqdm" },
     { name = "vllm", marker = "extra == 'vllm'" },
 ]
 provides-extras = ["vllm"]
