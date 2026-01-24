@@ -1,11 +1,12 @@
-from agents.extensions.models.litellm_model import LitellmModel
-from pydantic import Field
-from pathlib import Path
+import json
 import subprocess
 import time
-from typing import Self, Any
+from pathlib import Path
+from typing import Self
+
 import httpx
-import json
+from agents.extensions.models.litellm_model import LitellmModel
+from pydantic import Field
 
 try:
     import torch
@@ -33,6 +34,7 @@ class VLLMSetup(BaseModel):
     reasoning_parser: str | None = None
     rope_scaling: RopeScaling | None = Field(default=None)
     quantization: str | None = Field(default=None)
+    host: str | None = None
 
     @classmethod
     def qwen3(cls, **kwargs) -> Self:
@@ -130,6 +132,8 @@ class VLLMSetup(BaseModel):
                 "rope_parameters": self.rope_scaling.model_dump(),
             }
             commands.extend(["--hf-overrides", json.dumps(hf_overrides)])
+        if self.host is not None:
+            commands.extend(["--host", self.host])
         vllm_process = subprocess.Popen(commands)
         self.vllm_process = vllm_process
         return vllm_process
