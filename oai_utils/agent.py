@@ -82,6 +82,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
         tool_use_behavior: Literal["run_llm_again", "stop_on_first_tool"]
         | StopAtTools
         | ToolsToFinalOutputFunction = "run_llm_again",
+        reset_tool_choice: bool = True,
     ) -> Self:
         if isinstance(
             model, (str, OpenAIChatCompletionsModel, LitellmModel, OpenAIResponsesModel)
@@ -100,6 +101,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
             tools=list(tools) if tools is not None else [],
             mcp_servers=mcp_servers if mcp_servers is not None else [],
             tool_use_behavior=tool_use_behavior,
+            reset_tool_choice=reset_tool_choice,
             **kwargs,  # type: ignore
         )
         return cls(agent=agent)

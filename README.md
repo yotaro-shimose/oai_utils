@@ -128,3 +128,56 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+### 5. Dynamic Termination with Context
+
+Use `StopAtTools` and `RunContextWrapper` to let the agent decide when to stop and return a result via a type-safe context.
+
+```python
+import asyncio
+from dotenv import load_dotenv
+from oai_utils.agent import AgentWrapper
+from agents import RunContextWrapper, StopAtTools, function_tool
+from pydantic import BaseModel
+
+load_dotenv()
+
+# 1. Define the context to store the result
+class SolverContext(BaseModel):
+    final_answer: str | None = None
+
+# 2. Define a tool that updates the context
+@function_tool
+def report_success(
+    wrapper: RunContextWrapper[SolverContext],
+    answer: str,
+) -> None:
+    """Report the final answer."""
+    wrapper.context.final_answer = answer
+
+async def main():
+    # 3. Create the agent with StopAtTools
+    agent = AgentWrapper[None].create(
+        name="Solver",
+        instructions="You are a solver. Calculate the result and report success.",
+        model="gpt-5-mini",
+        tools=[report_success],
+        tool_use_behavior=StopAtTools(
+            stop_at_tool_names=[report_success.name]
+        ),
+    )
+
+    context = SolverContext()
+
+    # 4. Run with context
+    # The agent will stop execution immediately after calling report_success
+    await agent.run("What is 12 * 12?", context=context)
+
+    if context.final_answer:
+        print(f"Result: {context.final_answer}")
+    else:
+        print("No result reported.")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
