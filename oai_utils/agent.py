@@ -11,7 +11,6 @@ from agents import (
     Model,
     ModelBehaviorError,
     ModelSettings,
-    OpenAIChatCompletionsModel,
     Runner,
     StopAtTools,
     Tool,
@@ -19,9 +18,7 @@ from agents import (
     TResponseInputItem,
     UserError,
 )
-from agents.extensions.models.litellm_model import LitellmModel
 from agents.mcp.server import MCPServer
-from agents.models.openai_responses import OpenAIResponsesModel
 from agents.run import DEFAULT_MAX_TURNS
 from litellm import ContextWindowExceededError
 from openai._exceptions import BadRequestError
@@ -84,9 +81,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
         | ToolsToFinalOutputFunction = "run_llm_again",
         reset_tool_choice: bool = True,
     ) -> Self:
-        if isinstance(
-            model, (str, OpenAIChatCompletionsModel, LitellmModel, OpenAIResponsesModel)
-        ):
+        if isinstance(model, (str, Model)):
             agents_sdk_model = model
         else:
             raise ValueError("Unsupported model type")

@@ -181,3 +181,48 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+### 6. Tinker Integration (Logprobs)
+
+The `oai_utils.tinker` module provides tools to integrate with Tinker-based RL workflows, specifically for capturing log probabilities and converting agent runs into trajectories.
+
+#### Components:
+- **`LogprobLitellmModel`**: A model wrapper that captures log probabilities from LiteLLM responses and attaches them to the output.
+- **`result_to_trajectory`**: A helper function convert an `AgentRunner` result into a Tinker `Trajectory` object.
+
+#### Example:
+
+```python
+import asyncio
+from dotenv import load_dotenv
+from oai_utils.agent import AgentWrapper
+from oai_utils.tinker import LogprobLitellmModel, result_to_trajectory
+import litellm
+
+litellm.add_function_to_prompt = True  # (Optional) This will add tool usage in the prompt
+load_dotenv()
+
+async def main():
+    # Use LogprobLitellmModel to capture logprobs
+    # Support for any model supported by LiteLLM (and Tinker provider)
+    model = LogprobLitellmModel(model="agl-tinker/meta-llama/Llama-3.2-1B")
+    
+    agent = AgentWrapper[str].create(
+        name="LogprobAgent",
+        instructions="Help me.",
+        model=model,
+    )
+    
+    # Run the agent
+    result = await agent.run("Hello!")
+    
+    # Convert result to Trajectory (for RL training)
+    trajectory = result_to_trajectory(result)
+    
+    print(f"Transitions: {len(trajectory.transitions)}")
+    if trajectory.transitions:
+        print(f"Action Logprobs: {len(trajectory.transitions[0].ac.logprobs)}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
