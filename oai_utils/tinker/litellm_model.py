@@ -314,7 +314,9 @@ class TinkerLLM(CustomLLM):
                     )
                 )
             else:
-                logger.warning(f"Failed to parse response: {parsed_response}")
+                logger.warning(
+                    "Failed to parse response, likely due to truncated response, submiting partial response."
+                )
                 # Go with the default path
                 content = parsed_response["content"]
                 if isinstance(content, list):
@@ -398,6 +400,7 @@ class TinkerLLM(CustomLLM):
         seed = self._get_optional_params(
             optional_params, ["seed"], int, lambda _: True, self.seed
         )
+
         model_input = self._prepare_model_input(messages=messages, tools=tools)
         params = SamplingParams(
             max_tokens=max_tokens,
