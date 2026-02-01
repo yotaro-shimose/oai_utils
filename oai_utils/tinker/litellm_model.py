@@ -1,3 +1,4 @@
+from tinker import SamplingClient
 from litellm import AsyncHTTPHandler
 import httpx
 from litellm import ModelConfig
@@ -290,10 +291,6 @@ class TinkerLLM(CustomLLM):
                     )
 
                 # Legacy content check
-                if not content:
-                    logger.warning(
-                        "Parsed content is empty. Original response: " + str(response)
-                    )
                 tool_calls = parsed_response.get("tool_calls", None)
                 if tool_calls:
                     tool_calls = [
@@ -373,7 +370,7 @@ class TinkerLLM(CustomLLM):
     ) -> ModelResponse:
         """Main entrypoint for LiteLLM to call."""
         tools = optional_params.get("tools", None)
-        sampling_client = optional_params.get("sampling_client")
+        sampling_client: SamplingClient | None = optional_params.get("sampling_client")
         if sampling_client is None:
             raise ValueError(
                 "Sampling client in optional_params is required for TinkerLLM."
@@ -411,9 +408,24 @@ class TinkerLLM(CustomLLM):
             seed=seed,
             stop=self.renderer.get_stop_sequences(),
         )
-        result = await sampling_client.sample_async(
-            prompt=model_input, sampling_params=params, num_samples=1
-        )
+        try:
+            result = await sampling_client.sample_async(
+                prompt=model_input, sampling_params=params, num_samples=1
+            )
+        except tinker.TinkerError as e:
+            if (
+                "Prompt length plus max_tokens exceeds the model's context window"
+                in str(e)
+            ):
+                raise litellm.ContextWindowExceededError(
+                    message="Prompt length plus max_tokens exceeds the model's context window",
+                    model=self.model_name,
+                    llm_provider="tinker",
+                ) from e
+            else:
+                raise e
+        except Exception as e:
+            raise e
         final_response = self._parse_response(model_input, result)
         return final_response
 
@@ -427,7 +439,7 @@ class TinkerLLM(CustomLLM):
             ModelConfig(
                 model_name=self.model_name,
                 litellm_params={
-                    "model": f"agl-tinker/{self.model_name}",
+                    "model": f"tinker/{self.model_name}",
                 },
                 tpm=1_000_000,
                 rpm=1_000,
@@ -444,9 +456,7 @@ class TinkerLLM(CustomLLM):
         Returns:
             Self for method chaining.
         """
-        litellm.custom_provider_map = [
-            {"provider": "agl-tinker", "custom_handler": self}
-        ]
+        litellm.custom_provider_map = [{"provider": "tinker", "custom_handler": self}]
         custom_llm_setup()
         return self
 

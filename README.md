@@ -205,7 +205,7 @@ load_dotenv()
 async def main():
     # Use LogprobLitellmModel to capture logprobs
     # Support for any model supported by LiteLLM (and Tinker provider)
-    model = LogprobLitellmModel(model="agl-tinker/meta-llama/Llama-3.2-1B")
+    model = LogprobLitellmModel(model="tinker/meta-llama/Llama-3.2-1B")
     
     agent = AgentWrapper[str].create(
         name="LogprobAgent",

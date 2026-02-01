@@ -29,7 +29,7 @@ from oai_utils.runresult import RunResultWrapper
 type AgentsSDKModel = str | Model
 
 
-class AgentRunFailure(BaseException):
+class AgentRunFailure(Exception):
     def __init__(
         self,
         message: str,

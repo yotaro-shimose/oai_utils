@@ -349,6 +349,13 @@ class LogprobLitellmModel(Model):
         converted_messages = Converter.items_to_messages(
             input, preserve_thinking_blocks=preserve_thinking_blocks
         )
+        # Convert None to empty string
+        converted_messages: list[ChatCompletionMessageParam] = [
+            {"content": "", "role": "user"}
+            if "content" in msg and msg["content"] is None
+            else msg
+            for msg in converted_messages
+        ]
 
         # Fix for interleaved thinking bug: reorder messages to ensure tool_use comes before tool_result  # noqa: E501
         if "anthropic" in self.model.lower() or "claude" in self.model.lower():
@@ -463,28 +470,32 @@ class LogprobLitellmModel(Model):
         # Pass the sampling client to the model.
         extra_kwargs["sampling_client"] = self.sampling_client  # type: ignore
 
-        ret = await litellm.acompletion(  # type: ignore
-            model=self.model,
-            messages=converted_messages,
-            tools=converted_tools or None,
-            temperature=model_settings.temperature,
-            top_p=model_settings.top_p,
-            frequency_penalty=model_settings.frequency_penalty,
-            presence_penalty=model_settings.presence_penalty,
-            max_tokens=model_settings.max_tokens,
-            tool_choice=self._remove_not_given(tool_choice),
-            response_format=self._remove_not_given(response_format),
-            parallel_tool_calls=parallel_tool_calls,
-            stream=stream,
-            stream_options=stream_options,
-            reasoning_effort=reasoning_effort,
-            top_logprobs=model_settings.top_logprobs,
-            extra_headers=self._merge_headers(model_settings),
-            api_key=self.api_key,
-            base_url=self.base_url,
-            **extra_kwargs,
-        )
-
+        try:
+            ret = await litellm.acompletion(  # type: ignore
+                model=self.model,
+                messages=converted_messages,
+                tools=converted_tools or None,
+                temperature=model_settings.temperature,
+                top_p=model_settings.top_p,
+                frequency_penalty=model_settings.frequency_penalty,
+                presence_penalty=model_settings.presence_penalty,
+                max_tokens=model_settings.max_tokens,
+                tool_choice=self._remove_not_given(tool_choice),
+                response_format=self._remove_not_given(response_format),
+                parallel_tool_calls=parallel_tool_calls,
+                stream=stream,
+                stream_options=stream_options,
+                reasoning_effort=reasoning_effort,
+                top_logprobs=model_settings.top_logprobs,
+                extra_headers=self._merge_headers(model_settings),
+                api_key=self.api_key,
+                base_url=self.base_url,
+                **extra_kwargs,
+            )
+        except litellm.APIConnectionError as e:
+            if "Unexpected content part type" in str(e):
+                raise ModelBehaviorError(str(e)) from e
+            raise e
         if isinstance(ret, litellm.ModelResponse):
             return ret
 
