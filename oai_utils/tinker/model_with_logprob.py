@@ -106,12 +106,14 @@ class LogprobLitellmModel(Model):
     def __init__(
         self,
         model: str,
+        sampling_client: tinker.SamplingClient,
         base_url: str | None = None,
         api_key: str | None = None,
     ):
         self.model = model
         self.base_url = base_url
         self.api_key = api_key
+        self.sampling_client = sampling_client
 
     async def get_response(  # type: ignore
         self,
@@ -458,6 +460,9 @@ class LogprobLitellmModel(Model):
         # Prevent duplicate reasoning_effort kwargs when it was promoted to a top-level argument.
         extra_kwargs.pop("reasoning_effort", None)
 
+        # Pass the sampling client to the model.
+        extra_kwargs["sampling_client"] = self.sampling_client  # type: ignore
+
         ret = await litellm.acompletion(  # type: ignore
             model=self.model,
             messages=converted_messages,
@@ -632,6 +637,9 @@ class LogprobLitellmModel(Model):
             **(model_settings.extra_headers or {}),
             **(HEADERS_OVERRIDE.get() or {}),
         }
+
+    def update_sampling_client(self, sampling_client: tinker.SamplingClient):
+        self.sampling_client = sampling_client
 
 
 class LitellmConverter:

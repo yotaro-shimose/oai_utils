@@ -93,8 +93,6 @@ class TinkerLLM(CustomLLM):
         model_name: str,
         renderer: Renderer,
         tokenizer: PreTrainedTokenizer,
-        sampling_client: tinker.SamplingClient,
-        max_tokens: int = 2048,
         temperature: float = 1.0,
         top_k: int = -1,
         top_p: float = 1.0,
@@ -104,8 +102,6 @@ class TinkerLLM(CustomLLM):
         self.model_name = model_name
         self.renderer = renderer
         self.tokenizer = tokenizer
-        self.sampling_client = sampling_client
-        self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
@@ -377,12 +373,17 @@ class TinkerLLM(CustomLLM):
     ) -> ModelResponse:
         """Main entrypoint for LiteLLM to call."""
         tools = optional_params.get("tools", None)
+        sampling_client = optional_params.get("sampling_client")
+        if sampling_client is None:
+            raise ValueError(
+                "Sampling client in optional_params is required for TinkerLLM."
+            )
         max_tokens = self._get_optional_params(
             optional_params,
             ["max_completion_tokens", "max_tokens"],
-            int,
-            lambda x: x >= 0,
-            self.max_tokens,
+            int | None,
+            lambda x: x >= 0 if x is not None else True,
+            None,
         )
         temperature = self._get_optional_params(
             optional_params,
@@ -410,7 +411,7 @@ class TinkerLLM(CustomLLM):
             seed=seed,
             stop=self.renderer.get_stop_sequences(),
         )
-        result = await self.sampling_client.sample_async(
+        result = await sampling_client.sample_async(
             prompt=model_input, sampling_params=params, num_samples=1
         )
         final_response = self._parse_response(model_input, result)
