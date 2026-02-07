@@ -4,6 +4,7 @@ from asyncio import timeout
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Self
 
+import openai
 from agents import (
     Agent,
     AgentsException,
@@ -46,7 +47,8 @@ class AgentRunFailure(Exception):
         original: AgentsException
         | ContextWindowExceededError
         | TimeoutError
-        | BadRequestError,
+        | BadRequestError
+        | openai.APITimeoutError,
     ):
         super().__init__(message)
         self.cause = cause
@@ -130,6 +132,12 @@ class AgentWrapper[TOutput: BaseModel | str]:
             finally:
                 self.agent.instructions = original_instructions
         except asyncio.TimeoutError as e:
+            raise AgentRunFailure(
+                str(e),
+                cause="Timeout",
+                original=e,
+            ) from e
+        except openai.APITimeoutError as e:
             raise AgentRunFailure(
                 str(e),
                 cause="Timeout",
