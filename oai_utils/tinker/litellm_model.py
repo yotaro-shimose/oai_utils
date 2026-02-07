@@ -1,53 +1,51 @@
-from tinker import SamplingClient
-from litellm import AsyncHTTPHandler
-import httpx
-from litellm import ModelConfig
-from typing import Self
 import logging
-import uuid
 import time
+import uuid
 from typing import (
     Any,
     Callable,
     Dict,
     List,
     Literal,
+    Self,
     Type,
     TypeGuard,
     TypeVar,
 )
 
+import httpx
 import litellm
 import tinker
+import tinker_cookbook.completers
+from agents.items import MessageOutputItem
+from litellm import AsyncHTTPHandler, ModelConfig
 from litellm.llms.custom_llm import CustomLLM
 from litellm.types.utils import (
     ChatCompletionMessageToolCall,
     ChatCompletionTokenLogprob,
+    Choices,
+    ModelResponse,
 )
 from litellm.types.utils import ChoiceLogprobs as LitellmChoiceLogprobs
-from litellm.types.utils import Choices
 from litellm.types.utils import Message as LitellmMessage
-from litellm.types.utils import ModelResponse
 from litellm.types.utils import TopLogprob as LitellmTopLogprob
 from litellm.utils import custom_llm_setup
 from pydantic import TypeAdapter
+from tinker import SamplingClient
 from tinker.types import ModelInput, SampleResponse, SamplingParams
 from tinker_cookbook.renderers import Message as TinkerMessage
 from tinker_cookbook.renderers import Renderer
 from tinker_cookbook.renderers import ToolCall as TinkerToolCall
 from tinker_cookbook.renderers.base import ToolSpec
+from tinker_cookbook.rl.types import Trajectory, Transition
 from transformers import PreTrainedTokenizer
 
 from oai_utils.runresult import RunResultWrapper
-from tinker_cookbook.rl.types import Trajectory, Transition
-from agents.items import MessageOutputItem
 from oai_utils.tinker.model_with_logprob import (
-    LogprobResponseOutputMessage,
     LogprobResponseFunctionToolCall,
+    LogprobResponseOutputMessage,
     TinkerModelResponse,
 )
-import tinker_cookbook.completers
-
 
 logger = logging.getLogger(__name__)
 
@@ -280,8 +278,10 @@ class TinkerLLM(CustomLLM):
                         elif part["type"] == "tool_call":
                             continue
                         else:
-                            raise ValueError(
-                                f"Unexpected content part type: {part['type']}"
+                            raise litellm.APIConnectionError(
+                                message=f"Unexpected content part type: {part['type']}",
+                                llm_provider="tinker",
+                                model=self.model_name,
                             )
                     content = "".join(text_parts)
 
@@ -465,12 +465,6 @@ def result_to_trajectory(result_wrapper: RunResultWrapper[Any]) -> Trajectory:
     """Convert a RunResultWrapper to a Trajectory."""
     transitions: list[Transition] = []
 
-    # We iterate over new_items to find actions taken by the agent
-    # and reconstruct the sequence of transitions from LogprobResponseOutputMessage.
-    # Each LogprobResponseOutputMessage contains:
-    # - model_input (Observation BEFORE this action)
-    # - tokens_with_logprobs (The Action taken)
-
     last_model_input: tinker.ModelInput | None = None
     last_action: tinker_cookbook.completers.TokensWithLogprobs | None = None
 
@@ -514,19 +508,10 @@ def result_to_trajectory(result_wrapper: RunResultWrapper[Any]) -> Trajectory:
                 last_action = action
 
     if not transitions:
-        # Fallback or empty?
-        # If no transitions found (maybe no tool calls or no model response with logs), return empty?
-        # But Trajectory requires final_ob.
         raise ValueError("No trajectory data found in result wrapper.")
 
     # Mark last transition as done
     transitions[-1].episode_done = True
-
-    # Construct final_ob
-    # We need to append the last action to the last observation to get the state AFTER the last action.
-    # tinker.ModelInput.append(...) takes a Chunk.
-    # We need to convert action (tokens) to a Chunk.
-    # EncodedTextChunk is likely what we want.
 
     assert last_model_input is not None
     assert last_action is not None

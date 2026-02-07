@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from asyncio import timeout
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Self
@@ -23,9 +24,10 @@ from agents.run import DEFAULT_MAX_TURNS
 from litellm import ContextWindowExceededError
 from openai._exceptions import BadRequestError
 from pydantic import BaseModel
-
+from agents.models.default_models import get_default_model_settings
 from oai_utils.runresult import RunResultWrapper
 
+logger = logging.getLogger(__name__)
 type AgentsSDKModel = str | Model
 
 
@@ -85,9 +87,8 @@ class AgentWrapper[TOutput: BaseModel | str]:
             agents_sdk_model = model
         else:
             raise ValueError("Unsupported model type")
-        kwargs = {}
-        if model_settings is not None:
-            kwargs["model_settings"] = model_settings
+        if model_settings is None:
+            model_settings = get_default_model_settings()
         agent = Agent(
             name=name,
             instructions=instructions,
@@ -97,7 +98,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
             mcp_servers=mcp_servers if mcp_servers is not None else [],
             tool_use_behavior=tool_use_behavior,
             reset_tool_choice=reset_tool_choice,
-            **kwargs,  # type: ignore
+            model_settings=model_settings,
         )
         return cls(agent=agent)
 
@@ -111,13 +112,23 @@ class AgentWrapper[TOutput: BaseModel | str]:
     ) -> RunResultWrapper[TOutput]:
         try:
             input_ = input if isinstance(input, str) else list(input)
-            async with timeout(time_out_seconds):
-                result = await Runner.run(
-                    self.agent,
-                    input=input_,
-                    context=context,
-                    max_turns=max_turns,
-                )
+
+            # Temporarily inject turn limit into instructions
+            original_instructions = self.agent.instructions
+            self.agent.instructions = (
+                f"{original_instructions}\n\nTURN LIMIT: {max_turns}"
+            )
+
+            try:
+                async with timeout(time_out_seconds):
+                    result = await Runner.run(
+                        self.agent,
+                        input=input_,
+                        context=context,
+                        max_turns=max_turns,
+                    )
+            finally:
+                self.agent.instructions = original_instructions
         except asyncio.TimeoutError as e:
             raise AgentRunFailure(
                 str(e),
@@ -150,4 +161,8 @@ class AgentWrapper[TOutput: BaseModel | str]:
             ) from e
         except BadRequestError as e:
             raise AgentRunFailure(str(e), cause="BadRequestError", original=e) from e
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}", exc_info=True)
+            raise e
+
         return RunResultWrapper[type(result.final_output)](result=result)
