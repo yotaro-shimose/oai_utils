@@ -115,22 +115,14 @@ class AgentWrapper[TOutput: BaseModel | str]:
         try:
             input_ = input if isinstance(input, str) else list(input)
 
-            # Temporarily inject turn limit into instructions
-            original_instructions = self.agent.instructions
-            self.agent.instructions = (
-                f"{original_instructions}\n\nTURN LIMIT: {max_turns}"
-            )
+            async with timeout(time_out_seconds):
+                result = await Runner.run(
+                    self.agent,
+                    input=input_,
+                    context=context,
+                    max_turns=max_turns,
+                )
 
-            try:
-                async with timeout(time_out_seconds):
-                    result = await Runner.run(
-                        self.agent,
-                        input=input_,
-                        context=context,
-                        max_turns=max_turns,
-                    )
-            finally:
-                self.agent.instructions = original_instructions
         except asyncio.TimeoutError as e:
             raise AgentRunFailure(
                 str(e),
