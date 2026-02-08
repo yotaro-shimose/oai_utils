@@ -1,5 +1,5 @@
 import tinker
-from oai_utils.tinker import LogprobLitellmModel
+from oai_utils.tinker.model_with_logprob import LogprobLitellmModel
 from oai_utils.tinker.litellm_model import TinkerLLM
 from tinker_cookbook import model_info, renderers
 from tinker_cookbook.renderers import Renderer

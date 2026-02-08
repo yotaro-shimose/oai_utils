@@ -1,3 +1,4 @@
+from agents import RunItem
 import logging
 import time
 import uuid
@@ -17,30 +18,27 @@ import httpx
 import litellm
 import tinker
 import tinker_cookbook.completers
-from agents.items import MessageOutputItem
 from litellm import AsyncHTTPHandler, ModelConfig
 from litellm.llms.custom_llm import CustomLLM
 from litellm.types.utils import (
     ChatCompletionMessageToolCall,
-    ChatCompletionTokenLogprob,
     Choices,
     ModelResponse,
 )
-from litellm.types.utils import ChoiceLogprobs as LitellmChoiceLogprobs
 from litellm.types.utils import Message as LitellmMessage
-from litellm.types.utils import TopLogprob as LitellmTopLogprob
 from litellm.utils import custom_llm_setup
 from pydantic import TypeAdapter
 from tinker import SamplingClient
 from tinker.types import ModelInput, SampleResponse, SamplingParams
-from tinker_cookbook.renderers import Message as TinkerMessage
-from tinker_cookbook.renderers import Renderer
-from tinker_cookbook.renderers import ToolCall as TinkerToolCall
-from tinker_cookbook.renderers.base import ToolSpec
+from tinker_cookbook.renderers import (
+    Renderer,
+    Message as TinkerMessage,
+    ToolCall as TinkerToolCall,
+)
+from tinker_cookbook.renderers.base import ContentPart, ToolSpec
 from tinker_cookbook.rl.types import Trajectory, Transition
 from transformers import PreTrainedTokenizer
 
-from oai_utils.runresult import RunResultWrapper
 from oai_utils.tinker.model_with_logprob import (
     LogprobResponseFunctionToolCall,
     LogprobResponseOutputMessage,
@@ -223,6 +221,24 @@ class TinkerLLM(CustomLLM):
         canonical_messages = self._canonicalize_messages(final_messages)
         return self.renderer.build_generation_prompt(canonical_messages)
 
+    def _construct_text_parts(self, content: list[ContentPart]) -> str:
+        text_parts = []
+        for part in content:
+            if part["type"] == "text":
+                text_parts.append(part["text"])
+            elif part["type"] == "thinking":
+                text_parts.append(f"<think>{part['thinking']}</think>")
+            elif part["type"] == "tool_call":
+                continue
+            else:
+                raise litellm.APIConnectionError(
+                    message=f"Unexpected content part type: {part['type']}",
+                    llm_provider="tinker",
+                    model=self.model_name,
+                )
+        content_str = "".join(text_parts)
+        return content_str
+
     def _parse_response(
         self, model_input: ModelInput, response: SampleResponse
     ) -> ModelResponse:
@@ -231,35 +247,16 @@ class TinkerLLM(CustomLLM):
         Extract log probabilities as well.
         """
         choices: List[Choices] = []
-        for seq in response.sequences:
-            if seq.logprobs is not None:
-                token_strings: List[str] = self.tokenizer.batch_decode(
-                    [token]  # type: ignore
-                    for token in seq.tokens
-                )
-                bytes_list: List[List[int]] = [
-                    list(token.encode("utf-8")) for token in token_strings
-                ]
-                logprobs = LitellmChoiceLogprobs(
-                    content=[
-                        ChatCompletionTokenLogprob(
-                            token=token,
-                            bytes=bytes,
-                            logprob=logprob,
-                            # Note: This top logprob is not accurate but satisfies validation
-                            top_logprobs=[
-                                LitellmTopLogprob(
-                                    token=token, bytes=bytes, logprob=logprob
-                                )
-                            ],
-                        )
-                        for token, bytes, logprob in zip(
-                            token_strings, bytes_list, seq.logprobs
-                        )
-                    ]
+        # We also want to capture the first sequence (which is what we use) as TokensWithLogprobs
+        tinker_output: tinker_cookbook.completers.TokensWithLogprobs | None = None
+
+        for i, seq in enumerate(response.sequences):
+            if i == 0:
+                tinker_output = tinker_cookbook.completers.TokensWithLogprobs(
+                    tokens=seq.tokens, maybe_logprobs=seq.logprobs
                 )
             else:
-                logprobs = None
+                raise NotImplementedError("Only the one sequence is supported")
 
             parsed_response, parse_success = self.renderer.parse_response(seq.tokens)
             if parse_success:
@@ -269,26 +266,7 @@ class TinkerLLM(CustomLLM):
 
                 content = parsed_response["content"]
                 if isinstance(content, list):
-                    text_parts = []
-                    for part in content:
-                        if part["type"] == "text":
-                            text_parts.append(part["text"])
-                        elif part["type"] == "thinking":
-                            text_parts.append(f"<think>{part['thinking']}</think>")
-                        elif part["type"] == "tool_call":
-                            continue
-                        else:
-                            raise litellm.APIConnectionError(
-                                message=f"Unexpected content part type: {part['type']}",
-                                llm_provider="tinker",
-                                model=self.model_name,
-                            )
-                    content = "".join(text_parts)
-
-                if content is not None and not isinstance(content, str):
-                    raise ValueError(
-                        f"Content must be str or None, got {type(content)}"
-                    )
+                    content = self._construct_text_parts(content)
 
                 # Legacy content check
                 tool_calls = parsed_response.get("tool_calls", None)
@@ -302,7 +280,7 @@ class TinkerLLM(CustomLLM):
                             role=role, content=content, tool_calls=tool_calls
                         ),
                         finish_reason=seq.stop_reason,
-                        logprobs=logprobs,
+                        logprobs=None,
                         token_ids=seq.tokens,
                     )
                 )
@@ -313,29 +291,13 @@ class TinkerLLM(CustomLLM):
                 # Go with the default path
                 content = parsed_response["content"]
                 if isinstance(content, list):
-                    text_parts = []
-                    for part in content:
-                        if part["type"] == "text":
-                            text_parts.append(part["text"])
-                        elif part["type"] == "thinking":
-                            text_parts.append(f"<think>{part['thinking']}</think>")
-                        elif part["type"] == "tool_call":
-                            continue
-                        else:
-                            raise ValueError(
-                                f"Unexpected content part type: {part['type']}"
-                            )
-                    content = "".join(text_parts)
+                    content = self._construct_text_parts(content)
 
-                if content is not None and not isinstance(content, str):
-                    raise ValueError(
-                        f"Content must be str or None, got {type(content)}"
-                    )
                 choices.append(
                     Choices(
                         message=LitellmMessage(role="assistant", content=content),
                         finish_reason=seq.stop_reason,
-                        logprobs=logprobs,
+                        logprobs=None,
                         token_ids=seq.tokens,
                     )
                 )
@@ -347,6 +309,7 @@ class TinkerLLM(CustomLLM):
             created=int(time.time()),
             model=self.model_name,
             object="chat.completion",
+            tinker_output=tinker_output,
         )
 
     async def acompletion(
@@ -461,51 +424,28 @@ class TinkerLLM(CustomLLM):
         return self
 
 
-def result_to_trajectory(result_wrapper: RunResultWrapper[Any]) -> Trajectory:
+def new_items_to_trajectory(new_items: list[RunItem]) -> Trajectory:
     """Convert a RunResultWrapper to a Trajectory."""
     transitions: list[Transition] = []
 
-    last_model_input: tinker.ModelInput | None = None
-    last_action: tinker_cookbook.completers.TokensWithLogprobs | None = None
+    for item in new_items:
+        # Inspect raw_item
+        if isinstance(
+            item.raw_item,
+            (LogprobResponseOutputMessage, LogprobResponseFunctionToolCall),
+        ):
+            traj_data = item.raw_item.tinker_trajectory_data
+            # Found a transition data point
+            obs = traj_data.model_input
+            action = traj_data.tokens_with_logprobs
 
-    for item in result_wrapper.result.new_items:
-        if isinstance(item, MessageOutputItem):
-            # Inspect raw_item
-            if hasattr(item, "raw_item") and isinstance(
-                item.raw_item, LogprobResponseOutputMessage
-            ):
-                traj_data = item.raw_item.tinker_trajectory_data
-                if traj_data:
-                    # Found a transition data point
-                    obs = traj_data.model_input
-                    action = traj_data.tokens_with_logprobs
-
-                    transition = Transition(
-                        ob=obs,
-                        ac=action,
-                        reward=0.0,
-                        episode_done=False,
-                    )
-                    transitions.append(transition)
-
-                    last_model_input = obs
-                    last_action = action
-        elif isinstance(item, LogprobResponseFunctionToolCall):
-            traj_data = item.tinker_trajectory_data
-            if traj_data:
-                obs = traj_data.model_input
-                action = traj_data.tokens_with_logprobs
-
-                transition = Transition(
-                    ob=obs,
-                    ac=action,
-                    reward=0.0,
-                    episode_done=False,
-                )
-                transitions.append(transition)
-
-                last_model_input = obs
-                last_action = action
+            transition = Transition(
+                ob=obs,
+                ac=action,
+                reward=0.0,
+                episode_done=False,
+            )
+            transitions.append(transition)
 
     if not transitions:
         raise ValueError("No trajectory data found in result wrapper.")
@@ -513,13 +453,10 @@ def result_to_trajectory(result_wrapper: RunResultWrapper[Any]) -> Trajectory:
     # Mark last transition as done
     transitions[-1].episode_done = True
 
-    assert last_model_input is not None
-    assert last_action is not None
-
-    # We append the action to get final state.
+    # We append the action to get final state. This will not be used for typical PPO/GRPO.
     # Note: validation of append might require knowing if it's text or image, but tokens suggest text.
-    final_ob = last_model_input.append(
-        tinker.types.EncodedTextChunk(tokens=last_action.tokens)
+    final_ob = transitions[-1].ob.append(
+        tinker.types.EncodedTextChunk(tokens=transitions[-1].ac.tokens)
     )
 
     return Trajectory(

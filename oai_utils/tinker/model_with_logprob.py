@@ -1,20 +1,19 @@
-from openai.types.responses import ResponsePromptParam
-from litellm.types.llms.openai import ChatCompletionAnnotation
 import json
 import time
 from collections.abc import AsyncIterator
 from copy import copy
 from dataclasses import dataclass
 from typing import Any, Literal, cast, overload
-import tinker
-from tinker_cookbook.completers import TokensWithLogprobs
 
+import tinker
+from agents.exceptions import ModelBehaviorError
+from litellm.types.llms.openai import ChatCompletionAnnotation
+from openai.types.responses import ResponsePromptParam
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
-
-from agents.exceptions import ModelBehaviorError
+from tinker_cookbook.completers import TokensWithLogprobs
 
 try:
     import litellm
@@ -23,29 +22,6 @@ except ImportError as _e:
         "`litellm` is required to use the LitellmModel. You can install it via the optional "
         "dependency group: `pip install 'openai-agents[litellm]'`."
     ) from _e
-
-from openai import AsyncStream, NotGiven, omit
-from openai.types.chat import (
-    ChatCompletionChunk,
-    ChatCompletionMessageCustomToolCall,
-    ChatCompletionMessageFunctionToolCall,
-    ChatCompletionMessageParam,
-)
-from openai.types.chat.chat_completion_message import (
-    Annotation,
-    AnnotationURLCitation,
-    ChatCompletionMessage,
-)
-from openai.types.chat.chat_completion_message_function_tool_call import Function
-from openai.types.responses import Response
-from litellm.types.utils import ModelResponse
-from tinker.types import ModelInput
-
-
-from openai.types.responses.response_output_item import ResponseFunctionToolCall
-from openai.types.responses.response_output_message import (
-    ResponseOutputMessage,
-)
 
 from agents import _debug
 from agents.agent_output import AgentOutputSchemaBase
@@ -68,10 +44,41 @@ from agents.tracing.span_data import GenerationSpanData
 from agents.tracing.spans import Span
 from agents.usage import Usage
 from agents.util._json import _to_dump_compatible
+from litellm.types.utils import ModelResponse
+from openai import AsyncStream, NotGiven, omit
+from openai.types.chat import (
+    ChatCompletionChunk,
+    ChatCompletionMessageCustomToolCall,
+    ChatCompletionMessageFunctionToolCall,
+    ChatCompletionMessageParam,
+)
+from openai.types.chat.chat_completion_message import (
+    Annotation,
+    AnnotationURLCitation,
+    ChatCompletionMessage,
+)
+from openai.types.chat.chat_completion_message_function_tool_call import Function
+from openai.types.responses import Response
+from openai.types.responses.response_output_item import ResponseFunctionToolCall
+from openai.types.responses.response_output_message import (
+    ResponseOutputMessage,
+)
+from tinker.types import ModelInput
 
 
 class TinkerModelResponse(ModelResponse):
     tinker_model_input: ModelInput
+    tinker_output: TokensWithLogprobs
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(id={self.id!r}, "
+            f"choices={self.choices!r}, "
+            f"created={self.created!r}, "
+            f"model={self.model!r}, "
+            f"tinker_model_input=..., "
+            f"tinker_output=...)"
+        )
 
 
 class InternalChatCompletionMessage(ChatCompletionMessage):
@@ -88,13 +95,16 @@ class TinkerTrajectoryData:
     model_input: tinker.ModelInput
     tokens_with_logprobs: TokensWithLogprobs
 
+    def __repr__(self) -> str:
+        return "TinkerTrajectoryData(model_input=..., tokens_with_logprobs=...)"
+
 
 class LogprobResponseOutputMessage(ResponseOutputMessage):
-    tinker_trajectory_data: TinkerTrajectoryData | None = None
+    tinker_trajectory_data: TinkerTrajectoryData
 
 
 class LogprobResponseFunctionToolCall(ResponseFunctionToolCall):
-    tinker_trajectory_data: TinkerTrajectoryData | None = None
+    tinker_trajectory_data: TinkerTrajectoryData
 
 
 class LogprobLitellmModel(Model):
@@ -220,30 +230,11 @@ class LogprobLitellmModel(Model):
             )
 
             # If we have logprobs and items, we want to attach them to the output item
-            if message is not None and items and first_choice and first_choice.logprobs:
-                content_logprobs = first_choice.logprobs.content
-
-                if content_logprobs:
-                    token_ids = getattr(first_choice, "token_ids", None)
-
-                    tokens = []
-                    logprobs_list = []
-                    for i, tok in enumerate(content_logprobs):
-                        if token_ids and i < len(token_ids):
-                            tokens.append(int(token_ids[i]))
-                        else:
-                            tokens.append(0)
-                        logprobs_list.append(tok.logprob)
-
-                    t_input = tinker.ModelInput(chunks=[])
-                    if isinstance(response, TinkerModelResponse):
-                        t_input = response.tinker_model_input
-
+            if message is not None and items:
+                if isinstance(response, TinkerModelResponse):
                     traj_data = TinkerTrajectoryData(
-                        model_input=t_input,
-                        tokens_with_logprobs=TokensWithLogprobs(
-                            tokens=tokens, maybe_logprobs=logprobs_list
-                        ),
+                        model_input=response.tinker_model_input,
+                        tokens_with_logprobs=response.tinker_output,
                     )
 
                     final_items: list[TResponseOutputItem] = []
@@ -494,7 +485,7 @@ class LogprobLitellmModel(Model):
             )
         except litellm.APIConnectionError as e:
             if "Unexpected content part type" in str(e):
-                raise ModelBehaviorError(str(e)) from e
+                raise ModelBehaviorError("Unexpected content part type") from e
             raise e
         if isinstance(ret, litellm.ModelResponse):
             return ret
