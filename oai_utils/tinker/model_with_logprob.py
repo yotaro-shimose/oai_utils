@@ -249,18 +249,6 @@ class LogprobLitellmModel(Model):
                                 tinker_trajectory_data=traj_data,
                             )
                             final_items.append(new_it)
-                        elif isinstance(it, ResponseFunctionToolCall):
-                            # Make sure to handle pure tool calls too
-                            new_it = LogprobResponseFunctionToolCall(
-                                id=it.id,
-                                call_id=it.call_id,
-                                name=it.name,
-                                arguments=it.arguments,
-                                type=it.type,
-                                provider_data=getattr(it, "provider_data", None),
-                                tinker_trajectory_data=traj_data,
-                            )
-                            final_items.append(new_it)
                         else:
                             final_items.append(it)
                     items = final_items
@@ -347,10 +335,6 @@ class LogprobLitellmModel(Model):
             else msg
             for msg in converted_messages
         ]
-
-        # Fix for interleaved thinking bug: reorder messages to ensure tool_use comes before tool_result  # noqa: E501
-        if "anthropic" in self.model.lower() or "claude" in self.model.lower():
-            converted_messages = self._fix_tool_message_ordering(converted_messages)
 
         if system_instructions:
             converted_messages.insert(

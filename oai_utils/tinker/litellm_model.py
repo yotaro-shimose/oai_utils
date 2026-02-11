@@ -1,4 +1,3 @@
-from agents import RunItem
 import logging
 import time
 import uuid
@@ -12,12 +11,14 @@ from typing import (
     Type,
     TypeGuard,
     TypeVar,
+    cast,
 )
 
 import httpx
 import litellm
 import tinker
 import tinker_cookbook.completers
+from agents import RunItem
 from litellm import AsyncHTTPHandler, ModelConfig
 from litellm.llms.custom_llm import CustomLLM
 from litellm.types.utils import (
@@ -31,8 +32,10 @@ from pydantic import TypeAdapter
 from tinker import SamplingClient
 from tinker.types import ModelInput, SampleResponse, SamplingParams
 from tinker_cookbook.renderers import (
-    Renderer,
     Message as TinkerMessage,
+)
+from tinker_cookbook.renderers import Renderer
+from tinker_cookbook.renderers import (
     ToolCall as TinkerToolCall,
 )
 from tinker_cookbook.renderers.base import ContentPart, ToolSpec
@@ -104,14 +107,6 @@ class TinkerLLM(CustomLLM):
         self.top_p = top_p
         self.seed = seed
 
-    def update_sampling_client(self, sampling_client: tinker.SamplingClient) -> None:
-        """Update the sampling client used for generation.
-
-        Args:
-            sampling_client: New Tinker sampling client to use.
-        """
-        self.sampling_client = sampling_client
-
     def _canonicalize_messages(self, messages: Any) -> List[TinkerMessage]:
         return TypeAdapter(
             List[TinkerMessage], config={"arbitrary_types_allowed": True}
@@ -157,7 +152,7 @@ class TinkerLLM(CustomLLM):
 
     def _prepare_model_input(
         self,
-        messages: list,
+        messages: list[LitellmMessage],
         tools: list | None,
     ) -> ModelInput:
         """LiteLLM messages -> Tinker ModelInput."""
@@ -169,11 +164,11 @@ class TinkerLLM(CustomLLM):
         # Handle Tools if present
         if tools:
             # 1. Extract system instruction
-            system_instructions = ""
+            system_instructions: str = ""
             system_msg_index = -1
             for i, msg in enumerate(final_messages):
                 if msg.get("role") == "system":
-                    system_instructions = msg.get("content", "")
+                    system_instructions = cast(str, msg.get("content", ""))
                     system_msg_index = i
                     break
 
@@ -183,11 +178,11 @@ class TinkerLLM(CustomLLM):
                 if t.get("type") == "function":
                     f = t["function"]
                     tool_specs.append(
-                        {
-                            "name": f["name"],
-                            "description": f.get("description", ""),
-                            "parameters": f.get("parameters", {}),
-                        }
+                        ToolSpec(
+                            name=f["name"],
+                            description=f.get("description", ""),
+                            parameters=f.get("parameters", {}),
+                        )
                     )
 
             # 3. Create prefix messages
@@ -197,12 +192,9 @@ class TinkerLLM(CustomLLM):
                 )
 
                 # Replace system message with prefix messages
-                new_messages = []
+                new_messages: list[TinkerMessage | LitellmMessage] = []
                 # Add prefix
-                # We need to cast prefix_messages (TinkerMessage) to dicts if needed,
-                # but valid dictionaries should pass canonicalization.
                 new_messages.extend(prefix_messages)
-
                 # Add rest of messages, skipping original system message
                 for i, msg in enumerate(final_messages):
                     if i == system_msg_index:
@@ -315,7 +307,7 @@ class TinkerLLM(CustomLLM):
     async def acompletion(
         self,
         model: str,
-        messages: list,
+        messages: list[LitellmMessage],
         api_base: str,
         custom_prompt_dict: dict,
         model_response: ModelResponse,
