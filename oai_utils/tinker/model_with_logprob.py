@@ -217,8 +217,12 @@ class LogprobLitellmModel(Model):
                     [message.model_dump()] if message is not None else []
                 )
             span_generation.span_data.usage = {
+                "requests": usage.requests,
                 "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+                "input_tokens_details": usage.input_tokens_details.model_dump(),
+                "output_tokens_details": usage.output_tokens_details.model_dump(),
             }
 
             items = (

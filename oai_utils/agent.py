@@ -21,11 +21,12 @@ from agents import (
     UserError,
 )
 from agents.mcp.server import MCPServer
+from agents.models.default_models import get_default_model_settings
 from agents.run import DEFAULT_MAX_TURNS
 from litellm import ContextWindowExceededError
 from openai._exceptions import BadRequestError
 from pydantic import BaseModel
-from agents.models.default_models import get_default_model_settings
+
 from oai_utils.runresult import RunResultWrapper
 
 logger = logging.getLogger(__name__)
