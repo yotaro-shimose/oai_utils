@@ -1,3 +1,5 @@
+import pydantic
+from tinker import ModelInput
 import json
 import time
 from collections.abc import AsyncIterator
@@ -14,6 +16,7 @@ from openai.types.responses.response_usage import (
     OutputTokensDetails,
 )
 from tinker_cookbook.completers import TokensWithLogprobs
+from tinker_cookbook.rl.types import Trajectory, Transition
 
 try:
     import litellm
@@ -28,7 +31,6 @@ from agents.agent_output import AgentOutputSchemaBase
 from agents.handoffs import Handoff
 from agents.items import (
     TResponseInputItem,
-    TResponseOutputItem,
     TResponseStreamEvent,
 )
 from agents.logger import logger
@@ -44,7 +46,7 @@ from agents.tracing.span_data import GenerationSpanData
 from agents.tracing.spans import Span
 from agents.usage import Usage
 from agents.util._json import _to_dump_compatible
-from litellm.types.utils import ModelResponse
+from agents.items import ModelResponse
 from openai import AsyncStream, NotGiven, omit
 from openai.types.chat import (
     ChatCompletionChunk,
@@ -63,22 +65,6 @@ from openai.types.responses.response_output_item import ResponseFunctionToolCall
 from openai.types.responses.response_output_message import (
     ResponseOutputMessage,
 )
-from tinker.types import ModelInput
-
-
-class TinkerModelResponse(ModelResponse):
-    tinker_model_input: ModelInput
-    tinker_output: TokensWithLogprobs
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}(id={self.id!r}, "
-            f"choices={self.choices!r}, "
-            f"created={self.created!r}, "
-            f"model={self.model!r}, "
-            f"tinker_model_input=..., "
-            f"tinker_output=...)"
-        )
 
 
 class InternalChatCompletionMessage(ChatCompletionMessage):
@@ -107,6 +93,12 @@ class LogprobResponseFunctionToolCall(ResponseFunctionToolCall):
     tinker_trajectory_data: TinkerTrajectoryData
 
 
+@pydantic.dataclasses.dataclass
+class TinkerModelResponse(ModelResponse):
+    tinker_model_input: ModelInput
+    tinker_output: TokensWithLogprobs
+
+
 class LogprobLitellmModel(Model):
     """This class enables using any model via LiteLLM. LiteLLM allows you to acess OpenAPI,
     Anthropic, Gemini, Mistral, and many other models.
@@ -125,7 +117,7 @@ class LogprobLitellmModel(Model):
         self.api_key = api_key
         self.sampling_client = sampling_client
 
-    async def get_response(  # type: ignore
+    async def get_response(
         self,
         system_instructions: str | None,
         input: str | list[TResponseInputItem],
@@ -137,7 +129,7 @@ class LogprobLitellmModel(Model):
         previous_response_id: str | None = None,  # unused
         conversation_id: str | None = None,  # unused
         prompt: Any | None = None,
-    ) -> ModelResponse:
+    ) -> TinkerModelResponse:
         with generation_span(
             model=str(self.model),
             model_config=model_settings.to_json_dict()
@@ -159,11 +151,26 @@ class LogprobLitellmModel(Model):
 
             message: litellm.Message | None = None
             first_choice: litellm.Choices | None = None
-            if response.choices and len(response.choices) > 0:
-                choice = response.choices[0]
-                if isinstance(choice, litellm.Choices):
-                    first_choice = choice
-                    message = first_choice.message
+            if not (response.choices or len(response.choices) > 0):
+                raise ValueError("No choices in response")
+
+            choice = response.choices[0]
+            if not isinstance(choice, litellm.Choices):
+                raise ValueError("Choice is not a litellm.Choices")
+
+            first_choice = choice
+            message = first_choice.message
+            if not isinstance(message.provider_specific_fields, dict):
+                raise ValueError("Missing provider_specific_fields in message")
+            if (
+                "tinker_model_input" not in message.provider_specific_fields
+                or "tinker_output" not in message.provider_specific_fields
+            ):
+                raise ValueError(
+                    "Missing tinker_model_input or tinker_output in choice"
+                )
+            model_input = message.provider_specific_fields["tinker_model_input"]
+            output = message.provider_specific_fields["tinker_output"]
 
             if _debug.DONT_LOG_MODEL_DATA:
                 logger.debug("Received model response")
@@ -186,7 +193,6 @@ class LogprobLitellmModel(Model):
                 response_usage = response.usage
                 usage = (
                     Usage(
-                        requests=1,
                         input_tokens=response_usage.prompt_tokens,
                         output_tokens=response_usage.completion_tokens,
                         total_tokens=response_usage.total_tokens,
@@ -216,14 +222,6 @@ class LogprobLitellmModel(Model):
                 span_generation.span_data.output = (
                     [message.model_dump()] if message is not None else []
                 )
-            span_generation.span_data.usage = {
-                "requests": usage.requests,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "total_tokens": usage.total_tokens,
-                "input_tokens_details": usage.input_tokens_details.model_dump(),
-                "output_tokens_details": usage.output_tokens_details.model_dump(),
-            }
 
             items = (
                 Converter.message_to_output_items(
@@ -233,34 +231,12 @@ class LogprobLitellmModel(Model):
                 else []
             )
 
-            # If we have logprobs and items, we want to attach them to the output item
-            if message is not None and items:
-                if isinstance(response, TinkerModelResponse):
-                    traj_data = TinkerTrajectoryData(
-                        model_input=response.tinker_model_input,
-                        tokens_with_logprobs=response.tinker_output,
-                    )
-
-                    final_items: list[TResponseOutputItem] = []
-                    for it in items:
-                        if isinstance(it, ResponseOutputMessage):
-                            new_it = LogprobResponseOutputMessage(
-                                id=it.id,
-                                role=it.role,
-                                content=it.content,
-                                status=it.status,
-                                type=it.type,
-                                tinker_trajectory_data=traj_data,
-                            )
-                            final_items.append(new_it)
-                        else:
-                            final_items.append(it)
-                    items = final_items
-
-            return ModelResponse(
+            return TinkerModelResponse(
                 output=items,
                 usage=usage,
                 response_id=None,
+                tinker_model_input=model_input,
+                tinker_output=output,
             )
 
     def stream_response(
@@ -732,3 +708,39 @@ class LitellmConverter:
                 arguments=tool_call.function.arguments,
             ),
         )
+
+
+def raw_responses_to_trajectory(raw_responses: list[ModelResponse]) -> Trajectory:
+    """Convert a RunResultWrapper to a Trajectory."""
+    transitions: list[Transition] = []
+
+    for response in raw_responses:
+        if isinstance(response, TinkerModelResponse):
+            # Found a transition data point
+            obs = response.tinker_model_input
+            action = response.tinker_output
+
+            transition = Transition(
+                ob=obs,
+                ac=action,
+                reward=0.0,
+                episode_done=False,
+            )
+            transitions.append(transition)
+
+    if not transitions:
+        raise ValueError("No trajectory data found in result wrapper.")
+
+    # Mark last transition as done
+    transitions[-1].episode_done = True
+
+    # We append the action to get final state. This will not be used for typical PPO/GRPO.
+    # Note: validation of append might require knowing if it's text or image, but tokens suggest text.
+    final_ob = transitions[-1].ob.append(
+        tinker.types.EncodedTextChunk(tokens=transitions[-1].ac.tokens)
+    )
+
+    return Trajectory(
+        transitions=transitions,
+        final_ob=final_ob,
+    )

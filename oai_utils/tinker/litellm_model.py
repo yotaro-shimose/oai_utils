@@ -18,7 +18,6 @@ import httpx
 import litellm
 import tinker
 import tinker_cookbook.completers
-from agents import RunItem
 from litellm import AsyncHTTPHandler, ModelConfig
 from litellm.llms.custom_llm import CustomLLM
 from litellm.types.utils import (
@@ -39,14 +38,8 @@ from tinker_cookbook.renderers import (
     ToolCall as TinkerToolCall,
 )
 from tinker_cookbook.renderers.base import ContentPart, ToolSpec
-from tinker_cookbook.rl.types import Trajectory, Transition
 from transformers import PreTrainedTokenizer
 
-from oai_utils.tinker.model_with_logprob import (
-    LogprobResponseFunctionToolCall,
-    LogprobResponseOutputMessage,
-    TinkerModelResponse,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +262,13 @@ class TinkerLLM(CustomLLM):
                 choices.append(
                     Choices(
                         message=LitellmMessage(
-                            role=role, content=content, tool_calls=tool_calls
+                            role=role,
+                            content=content,
+                            tool_calls=tool_calls,
+                            provider_specific_fields={
+                                "tinker_model_input": model_input,
+                                "tinker_output": tinker_output,
+                            },
                         ),
                         finish_reason=seq.stop_reason,
                         logprobs=None,
@@ -287,13 +286,20 @@ class TinkerLLM(CustomLLM):
 
                 choices.append(
                     Choices(
-                        message=LitellmMessage(role="assistant", content=content),
+                        message=LitellmMessage(
+                            role="assistant",
+                            content=content,
+                            provider_specific_fields={
+                                "tinker_model_input": model_input,
+                                "tinker_output": tinker_output,
+                            },
+                        ),
                         finish_reason=seq.stop_reason,
                         logprobs=None,
                         token_ids=seq.tokens,
                     )
                 )
-        return TinkerModelResponse(
+        return ModelResponse(
             id=generate_id("tinker-sampling-"),
             choices=choices,
             prompt_token_ids=model_input.to_ints(),
@@ -414,44 +420,3 @@ class TinkerLLM(CustomLLM):
         litellm.custom_provider_map = [{"provider": "tinker", "custom_handler": self}]
         custom_llm_setup()
         return self
-
-
-def new_items_to_trajectory(new_items: list[RunItem]) -> Trajectory:
-    """Convert a RunResultWrapper to a Trajectory."""
-    transitions: list[Transition] = []
-
-    for item in new_items:
-        # Inspect raw_item
-        if isinstance(
-            item.raw_item,
-            (LogprobResponseOutputMessage, LogprobResponseFunctionToolCall),
-        ):
-            traj_data = item.raw_item.tinker_trajectory_data
-            # Found a transition data point
-            obs = traj_data.model_input
-            action = traj_data.tokens_with_logprobs
-
-            transition = Transition(
-                ob=obs,
-                ac=action,
-                reward=0.0,
-                episode_done=False,
-            )
-            transitions.append(transition)
-
-    if not transitions:
-        raise ValueError("No trajectory data found in result wrapper.")
-
-    # Mark last transition as done
-    transitions[-1].episode_done = True
-
-    # We append the action to get final state. This will not be used for typical PPO/GRPO.
-    # Note: validation of append might require knowing if it's text or image, but tokens suggest text.
-    final_ob = transitions[-1].ob.append(
-        tinker.types.EncodedTextChunk(tokens=transitions[-1].ac.tokens)
-    )
-
-    return Trajectory(
-        transitions=transitions,
-        final_ob=final_ob,
-    )

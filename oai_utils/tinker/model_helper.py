@@ -152,7 +152,10 @@ def setup_tinkermodel(
         base_model=model_name, model_path=path
     )
     tokenizer = sampling_client.get_tokenizer()
-    image_processor = get_image_processor(model_name)
+    if "VL" in model_name:
+        image_processor = get_image_processor(model_name)
+    else:
+        image_processor = None
 
     renderer_name = model_info.get_recommended_renderer_name(model_name)
     renderer = renderers.get_renderer(renderer_name, tokenizer, image_processor)
