@@ -1,5 +1,3 @@
-import pydantic
-from tinker import ModelInput
 import json
 import time
 from collections.abc import AsyncIterator
@@ -7,6 +5,7 @@ from copy import copy
 from dataclasses import dataclass
 from typing import Any, Literal, cast, overload
 
+import pydantic
 import tinker
 from agents.exceptions import ModelBehaviorError
 from litellm.types.llms.openai import ChatCompletionAnnotation
@@ -15,7 +14,9 @@ from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
+from tinker import ModelInput
 from tinker_cookbook.completers import TokensWithLogprobs
+from tinker_cookbook.renderers import Renderer
 from tinker_cookbook.rl.types import Trajectory, Transition
 
 try:
@@ -30,6 +31,7 @@ from agents import _debug
 from agents.agent_output import AgentOutputSchemaBase
 from agents.handoffs import Handoff
 from agents.items import (
+    ModelResponse,
     TResponseInputItem,
     TResponseStreamEvent,
 )
@@ -46,7 +48,6 @@ from agents.tracing.span_data import GenerationSpanData
 from agents.tracing.spans import Span
 from agents.usage import Usage
 from agents.util._json import _to_dump_compatible
-from agents.items import ModelResponse
 from openai import AsyncStream, NotGiven, omit
 from openai.types.chat import (
     ChatCompletionChunk,
@@ -99,23 +100,18 @@ class TinkerModelResponse(ModelResponse):
     tinker_output: TokensWithLogprobs
 
 
-class LogprobLitellmModel(Model):
+@dataclass
+class TinkerModel(Model):
     """This class enables using any model via LiteLLM. LiteLLM allows you to acess OpenAPI,
     Anthropic, Gemini, Mistral, and many other models.
     See supported models here: [litellm models](https://docs.litellm.ai/docs/providers).
     """
 
-    def __init__(
-        self,
-        model: str,
-        sampling_client: tinker.SamplingClient,
-        base_url: str | None = None,
-        api_key: str | None = None,
-    ):
-        self.model = model
-        self.base_url = base_url
-        self.api_key = api_key
-        self.sampling_client = sampling_client
+    model: str
+    sampling_client: tinker.SamplingClient
+    renderer: Renderer
+    base_url: str | None = None
+    api_key: str | None = None
 
     async def get_response(
         self,
@@ -407,7 +403,7 @@ class LogprobLitellmModel(Model):
         if stream and model_settings.include_usage is not None:
             stream_options = {"include_usage": model_settings.include_usage}
 
-        extra_kwargs = {}
+        extra_kwargs: dict[str, Any] = {}
         if model_settings.extra_query:
             extra_kwargs["extra_query"] = copy(model_settings.extra_query)
         if model_settings.metadata:
@@ -423,7 +419,8 @@ class LogprobLitellmModel(Model):
         extra_kwargs.pop("reasoning_effort", None)
 
         # Pass the sampling client to the model.
-        extra_kwargs["sampling_client"] = self.sampling_client  # type: ignore
+        extra_kwargs["sampling_client"] = self.sampling_client
+        extra_kwargs["renderer"] = self.renderer
 
         try:
             ret = await litellm.acompletion(  # type: ignore

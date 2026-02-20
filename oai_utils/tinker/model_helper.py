@@ -23,8 +23,8 @@ from tinker_cookbook.renderers.qwen3 import (
 )
 from tinker_cookbook.tokenizer_utils import Tokenizer
 
+from oai_utils.tinker.agent_sdk_model import TinkerModel
 from oai_utils.tinker.litellm_model import TinkerLLM
-from oai_utils.tinker.model_with_logprob import LogprobLitellmModel
 
 
 def render_message_qwen3vl(
@@ -147,7 +147,7 @@ def render_message_qwen3(self, message: Message, ctx: RenderContext) -> Rendered
 
 def setup_tinkermodel(
     service_client: tinker.ServiceClient, model_name: str, path: str | None = None
-) -> tuple[LogprobLitellmModel, Tokenizer, Renderer]:
+) -> tuple[TinkerModel, Tokenizer, Renderer]:
     sampling_client = service_client.create_sampling_client(
         base_model=model_name, model_path=path
     )
@@ -164,13 +164,11 @@ def setup_tinkermodel(
         renderer.render_message = types.MethodType(render_message_qwen3, renderer)
     elif isinstance(renderer, Qwen3VLRenderer):
         renderer.render_message = types.MethodType(render_message_qwen3vl, renderer)
-    tinker_llm = TinkerLLM(
-        model_name=model_name, renderer=renderer, tokenizer=tokenizer
-    )
+    tinker_llm = TinkerLLM(model_name=model_name, tokenizer=tokenizer)
     tinker_llm.rewrite_litellm_custom_providers()
     litellm_model_name = f"tinker/{model_name}"
-    model = LogprobLitellmModel(
-        model=litellm_model_name, sampling_client=sampling_client
+    model = TinkerModel(
+        model=litellm_model_name, sampling_client=sampling_client, renderer=renderer
     )
 
     return model, tokenizer, renderer

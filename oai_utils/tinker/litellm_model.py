@@ -40,7 +40,6 @@ from tinker_cookbook.renderers import (
 from tinker_cookbook.renderers.base import ContentPart, ToolSpec
 from transformers import PreTrainedTokenizer
 
-
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -84,7 +83,6 @@ class TinkerLLM(CustomLLM):
         self,
         *,
         model_name: str,
-        renderer: Renderer,
         tokenizer: PreTrainedTokenizer,
         temperature: float = 1.0,
         top_k: int = -1,
@@ -93,7 +91,6 @@ class TinkerLLM(CustomLLM):
     ) -> None:
         """Initialize the TinkerLLM."""
         self.model_name = model_name
-        self.renderer = renderer
         self.tokenizer = tokenizer
         self.temperature = temperature
         self.top_k = top_k
@@ -145,6 +142,7 @@ class TinkerLLM(CustomLLM):
 
     def _prepare_model_input(
         self,
+        renderer: Renderer,
         messages: list[LitellmMessage],
         tools: list | None,
     ) -> ModelInput:
@@ -180,7 +178,7 @@ class TinkerLLM(CustomLLM):
 
             # 3. Create prefix messages
             try:
-                prefix_messages = self.renderer.create_conversation_prefix_with_tools(
+                prefix_messages = renderer.create_conversation_prefix_with_tools(
                     tool_specs, system_instructions
                 )
 
@@ -199,12 +197,12 @@ class TinkerLLM(CustomLLM):
             except NotImplementedError:
                 # Renderer doesn't support tools, ignore.
                 logger.warning(
-                    f"Renderer {type(self.renderer)} does not support 'create_conversation_prefix_with_tools'. Tools will be ignored."
+                    f"Renderer {type(renderer)} does not support 'create_conversation_prefix_with_tools'. Tools will be ignored."
                 )
                 pass
 
         canonical_messages = self._canonicalize_messages(final_messages)
-        return self.renderer.build_generation_prompt(canonical_messages)
+        return renderer.build_generation_prompt(canonical_messages)
 
     def _construct_text_parts(self, content: list[ContentPart]) -> str:
         text_parts = []
@@ -225,7 +223,7 @@ class TinkerLLM(CustomLLM):
         return content_str
 
     def _parse_response(
-        self, model_input: ModelInput, response: SampleResponse
+        self, model_input: ModelInput, response: SampleResponse, renderer: Renderer
     ) -> ModelResponse:
         """Tinker Response -> LiteLLM Response.
 
@@ -243,7 +241,7 @@ class TinkerLLM(CustomLLM):
             else:
                 raise NotImplementedError("Only the one sequence is supported")
 
-            parsed_response, parse_success = self.renderer.parse_response(seq.tokens)
+            parsed_response, parse_success = renderer.parse_response(seq.tokens)
             if parse_success:
                 role = parsed_response["role"]
                 if not self._validate_role(role):
@@ -332,10 +330,13 @@ class TinkerLLM(CustomLLM):
         """Main entrypoint for LiteLLM to call."""
         tools = optional_params.get("tools", None)
         sampling_client: SamplingClient | None = optional_params.get("sampling_client")
+        renderer: Renderer | None = optional_params.get("renderer")
         if sampling_client is None:
             raise ValueError(
                 "Sampling client in optional_params is required for TinkerLLM."
             )
+        if renderer is None:
+            raise ValueError("Renderer in optional_params is required for TinkerLLM.")
         max_tokens = self._get_optional_params(
             optional_params,
             ["max_completion_tokens", "max_tokens"],
@@ -360,14 +361,16 @@ class TinkerLLM(CustomLLM):
             optional_params, ["seed"], int, lambda _: True, self.seed
         )
 
-        model_input = self._prepare_model_input(messages=messages, tools=tools)
+        model_input = self._prepare_model_input(
+            renderer=renderer, messages=messages, tools=tools
+        )
         params = SamplingParams(
             max_tokens=max_tokens,
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
             seed=seed,
-            stop=self.renderer.get_stop_sequences(),
+            stop=renderer.get_stop_sequences(),
         )
         try:
             result = await sampling_client.sample_async(
@@ -387,7 +390,7 @@ class TinkerLLM(CustomLLM):
                 raise e
         except Exception as e:
             raise e
-        final_response = self._parse_response(model_input, result)
+        final_response = self._parse_response(model_input, result, renderer=renderer)
         return final_response
 
     def as_model_list(self) -> List[ModelConfig]:
