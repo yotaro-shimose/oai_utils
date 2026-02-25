@@ -22,6 +22,7 @@ from tinker_cookbook.renderers.qwen3 import (
     _merge_consecutive_text_parts,
 )
 from tinker_cookbook.tokenizer_utils import Tokenizer
+from transformers import PreTrainedTokenizer
 
 from oai_utils.tinker.agent_sdk_model import TinkerModel
 from oai_utils.tinker.litellm_model import TinkerLLM
@@ -145,13 +146,10 @@ def render_message_qwen3(self, message: Message, ctx: RenderContext) -> Rendered
     return RenderedMessage(header=header, output=output)
 
 
-def setup_tinkermodel(
-    service_client: tinker.ServiceClient, model_name: str, path: str | None = None
-) -> tuple[TinkerModel, Tokenizer, Renderer]:
-    sampling_client = service_client.create_sampling_client(
-        base_model=model_name, model_path=path
-    )
-    tokenizer = sampling_client.get_tokenizer()
+def get_tokenizer_renderer(
+    client: tinker.SamplingClient | tinker.TrainingClient, model_name: str
+) -> tuple[PreTrainedTokenizer, Renderer]:
+    tokenizer = client.get_tokenizer()
     if "VL" in model_name:
         image_processor = get_image_processor(model_name)
     else:
@@ -164,6 +162,16 @@ def setup_tinkermodel(
         renderer.render_message = types.MethodType(render_message_qwen3, renderer)
     elif isinstance(renderer, Qwen3VLRenderer):
         renderer.render_message = types.MethodType(render_message_qwen3vl, renderer)
+    return tokenizer, renderer
+
+
+def setup_tinkermodel(
+    service_client: tinker.ServiceClient, model_name: str, path: str | None = None
+) -> tuple[TinkerModel, Tokenizer, Renderer]:
+    sampling_client = service_client.create_sampling_client(
+        base_model=model_name, model_path=path
+    )
+    tokenizer, renderer = get_tokenizer_renderer(sampling_client, model_name)
     tinker_llm = TinkerLLM(model_name=model_name, tokenizer=tokenizer)
     tinker_llm.rewrite_litellm_custom_providers()
     litellm_model_name = f"tinker/{model_name}"
