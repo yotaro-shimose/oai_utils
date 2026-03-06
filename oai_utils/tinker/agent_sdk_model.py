@@ -63,9 +63,7 @@ from openai.types.chat.chat_completion_message import (
 from openai.types.chat.chat_completion_message_function_tool_call import Function
 from openai.types.responses import Response
 from openai.types.responses.response_output_item import ResponseFunctionToolCall
-from openai.types.responses.response_output_message import (
-    ResponseOutputMessage,
-)
+from openai.types.responses.response_output_message import ResponseOutputMessage
 
 
 class InternalChatCompletionMessage(ChatCompletionMessage):

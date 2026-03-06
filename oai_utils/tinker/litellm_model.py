@@ -18,6 +18,7 @@ import httpx
 import litellm
 import tinker
 import tinker_cookbook.completers
+from agents import ModelBehaviorError
 from litellm import AsyncHTTPHandler, ModelConfig
 from litellm.llms.custom_llm import CustomLLM
 from litellm.types.utils import (
@@ -204,13 +205,22 @@ class TinkerLLM(CustomLLM):
         canonical_messages = self._canonicalize_messages(final_messages)
         return renderer.build_generation_prompt(canonical_messages)
 
-    def _construct_text_parts(self, content: list[ContentPart]) -> str:
+    def _construct_text_parts(
+        self, content: list[ContentPart]
+    ) -> tuple[str, str | None]:
         text_parts = []
+        thinking: str | None = None
         for part in content:
             if part["type"] == "text":
                 text_parts.append(part["text"])
             elif part["type"] == "thinking":
-                text_parts.append(f"<think>{part['thinking']}</think>")
+                if thinking is not None:
+                    raise litellm.APIConnectionError(
+                        message="Multiple thinking parts in content",
+                        llm_provider="tinker",
+                        model=self.model_name,
+                    )
+                thinking = part["thinking"]
             elif part["type"] == "tool_call":
                 continue
             else:
@@ -220,7 +230,7 @@ class TinkerLLM(CustomLLM):
                     model=self.model_name,
                 )
         content_str = "".join(text_parts)
-        return content_str
+        return content_str, thinking
 
     def _parse_response(
         self, model_input: ModelInput, response: SampleResponse, renderer: Renderer
@@ -244,12 +254,21 @@ class TinkerLLM(CustomLLM):
             parsed_response, parse_success = renderer.parse_response(seq.tokens)
             if parse_success:
                 role = parsed_response["role"]
+                if (
+                    "unparsed_tool_calls" in parsed_response
+                    and parsed_response["unparsed_tool_calls"]
+                ):
+                    raise ModelBehaviorError(
+                        message=f"Invalid function call made. Raw text: {parsed_response['unparsed_tool_calls'][0].raw_text}"
+                    )
                 if not self._validate_role(role):
                     assert False, "This should never happen"
 
                 content = parsed_response["content"]
                 if isinstance(content, list):
-                    content = self._construct_text_parts(content)
+                    content, reasoning = self._construct_text_parts(content)
+                else:
+                    reasoning = None
 
                 # Legacy content check
                 tool_calls = parsed_response.get("tool_calls", None)
@@ -267,6 +286,7 @@ class TinkerLLM(CustomLLM):
                                 "tinker_model_input": model_input,
                                 "tinker_output": tinker_output,
                             },
+                            reasoning_content=reasoning,
                         ),
                         finish_reason=seq.stop_reason,
                         logprobs=None,
@@ -280,7 +300,9 @@ class TinkerLLM(CustomLLM):
                 # Go with the default path
                 content = parsed_response["content"]
                 if isinstance(content, list):
-                    content = self._construct_text_parts(content)
+                    content, reasoning = self._construct_text_parts(content)
+                else:
+                    reasoning = None
 
                 choices.append(
                     Choices(
@@ -291,6 +313,7 @@ class TinkerLLM(CustomLLM):
                                 "tinker_model_input": model_input,
                                 "tinker_output": tinker_output,
                             },
+                            reasoning_content=reasoning,
                         ),
                         finish_reason=seq.stop_reason,
                         logprobs=None,
