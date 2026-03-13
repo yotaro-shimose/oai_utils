@@ -13,6 +13,7 @@ from agents import (
     Model,
     ModelBehaviorError,
     ModelSettings,
+    RunConfig,
     Runner,
     StopAtTools,
     Tool,
@@ -112,6 +113,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
         context: Any | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         time_out_seconds: float | None = None,
+        run_config: RunConfig | None = None,
     ) -> RunResultWrapper[TOutput]:
         try:
             input_ = input if isinstance(input, str) else list(input)
@@ -122,6 +124,7 @@ class AgentWrapper[TOutput: BaseModel | str]:
                     input=input_,
                     context=context,
                     max_turns=max_turns,
+                    run_config=run_config,
                 )
 
         except asyncio.TimeoutError as e:

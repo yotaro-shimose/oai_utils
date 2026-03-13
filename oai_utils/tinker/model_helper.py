@@ -166,14 +166,17 @@ def get_tokenizer_renderer(
 
 
 def setup_tinkermodel(
-    service_client: tinker.ServiceClient, model_name: str, path: str | None = None
+    model_name: str,
+    path: str | None = None,
+    service_client: tinker.ServiceClient | None = None,
 ) -> tuple[TinkerModel, Tokenizer, Renderer]:
+    if service_client is None:
+        service_client = tinker.ServiceClient()
     sampling_client = service_client.create_sampling_client(
         base_model=model_name, model_path=path
     )
     tokenizer, renderer = get_tokenizer_renderer(sampling_client, model_name)
-    tinker_llm = TinkerLLM(model_name=model_name, tokenizer=tokenizer)
-    tinker_llm.rewrite_litellm_custom_providers()
+    TinkerLLM().rewrite_litellm_custom_providers()
     litellm_model_name = f"tinker/{model_name}"
     model = TinkerModel(
         model=litellm_model_name, sampling_client=sampling_client, renderer=renderer

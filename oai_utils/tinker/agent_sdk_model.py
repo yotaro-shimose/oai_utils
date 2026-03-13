@@ -19,6 +19,8 @@ from tinker_cookbook.completers import TokensWithLogprobs
 from tinker_cookbook.renderers import Renderer
 from tinker_cookbook.rl.types import Trajectory, Transition
 
+from oai_utils.tinker.litellm_model import TinkerLLM
+
 try:
     import litellm
 except ImportError as _e:
@@ -92,7 +94,7 @@ class LogprobResponseFunctionToolCall(ResponseFunctionToolCall):
     tinker_trajectory_data: TinkerTrajectoryData
 
 
-@pydantic.dataclasses.dataclass
+@pydantic.dataclasses.dataclass(kw_only=True)
 class TinkerModelResponse(ModelResponse):
     tinker_model_input: ModelInput
     tinker_output: TokensWithLogprobs
@@ -110,6 +112,10 @@ class TinkerModel(Model):
     renderer: Renderer
     base_url: str | None = None
     api_key: str | None = None
+
+    @classmethod
+    def register_tinkerllm_to_litellm(cls):
+        TinkerLLM().rewrite_litellm_custom_providers()
 
     async def get_response(
         self,

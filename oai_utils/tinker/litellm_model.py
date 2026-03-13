@@ -39,7 +39,6 @@ from tinker_cookbook.renderers import (
     ToolCall as TinkerToolCall,
 )
 from tinker_cookbook.renderers.base import ContentPart, ToolSpec
-from transformers import PreTrainedTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -83,16 +82,12 @@ class TinkerLLM(CustomLLM):
     def __init__(
         self,
         *,
-        model_name: str,
-        tokenizer: PreTrainedTokenizer,
         temperature: float = 1.0,
         top_k: int = -1,
         top_p: float = 1.0,
         seed: int = 42,
     ) -> None:
         """Initialize the TinkerLLM."""
-        self.model_name = model_name
-        self.tokenizer = tokenizer
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
@@ -206,7 +201,7 @@ class TinkerLLM(CustomLLM):
         return renderer.build_generation_prompt(canonical_messages)
 
     def _construct_text_parts(
-        self, content: list[ContentPart]
+        self, content: list[ContentPart], model_name: str
     ) -> tuple[str, str | None]:
         text_parts = []
         thinking: str | None = None
@@ -218,7 +213,7 @@ class TinkerLLM(CustomLLM):
                     raise litellm.APIConnectionError(
                         message="Multiple thinking parts in content",
                         llm_provider="tinker",
-                        model=self.model_name,
+                        model=model_name,
                     )
                 thinking = part["thinking"]
             elif part["type"] == "tool_call":
@@ -227,13 +222,17 @@ class TinkerLLM(CustomLLM):
                 raise litellm.APIConnectionError(
                     message=f"Unexpected content part type: {part['type']}",
                     llm_provider="tinker",
-                    model=self.model_name,
+                    model=model_name,
                 )
         content_str = "".join(text_parts)
         return content_str, thinking
 
     def _parse_response(
-        self, model_input: ModelInput, response: SampleResponse, renderer: Renderer
+        self,
+        model_input: ModelInput,
+        response: SampleResponse,
+        renderer: Renderer,
+        model_name: str,
     ) -> ModelResponse:
         """Tinker Response -> LiteLLM Response.
 
@@ -266,7 +265,9 @@ class TinkerLLM(CustomLLM):
 
                 content = parsed_response["content"]
                 if isinstance(content, list):
-                    content, reasoning = self._construct_text_parts(content)
+                    content, reasoning = self._construct_text_parts(
+                        content, model_name=model_name
+                    )
                 else:
                     reasoning = None
 
@@ -300,7 +301,7 @@ class TinkerLLM(CustomLLM):
                 # Go with the default path
                 content = parsed_response["content"]
                 if isinstance(content, list):
-                    content, reasoning = self._construct_text_parts(content)
+                    content, reasoning = self._construct_text_parts(content, model_name)
                 else:
                     reasoning = None
 
@@ -326,7 +327,7 @@ class TinkerLLM(CustomLLM):
             prompt_token_ids=model_input.to_ints(),
             tinker_model_input=model_input,
             created=int(time.time()),
-            model=self.model_name,
+            model=model_name,
             object="chat.completion",
             tinker_output=tinker_output,
         )
@@ -406,14 +407,16 @@ class TinkerLLM(CustomLLM):
             ):
                 raise litellm.ContextWindowExceededError(
                     message="Prompt length plus max_tokens exceeds the model's context window",
-                    model=self.model_name,
+                    model=model,
                     llm_provider="tinker",
                 ) from e
             else:
                 raise e
         except Exception as e:
             raise e
-        final_response = self._parse_response(model_input, result, renderer=renderer)
+        final_response = self._parse_response(
+            model_input, result, renderer=renderer, model_name=model
+        )
         return final_response
 
     def as_model_list(self) -> List[ModelConfig]:
@@ -422,18 +425,41 @@ class TinkerLLM(CustomLLM):
         Returns:
             List containing model configuration dict for LiteLLM.
         """
+        model_names = [
+            "Qwen/Qwen3.5-397B-A17B",
+            "Qwen/Qwen3.5-35B-A3B",
+            "Qwen/Qwen3.5-27B",
+            "Qwen/Qwen3.5-4B",
+            "Qwen/Qwen3-VL-235B-A22B-Instruct",
+            "Qwen/Qwen3-VL-30B-A3B-Instruct",
+            "Qwen/Qwen3-235B-A22B-Instruct-2507",
+            "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "Qwen/Qwen3-30B-A3B",
+            "Qwen/Qwen3-30B-A3B-Base",
+            "Qwen/Qwen3-32B",
+            "Qwen/Qwen3-8B",
+            "Qwen/Qwen3-8B-Base",
+            "Qwen/Qwen3-4B-Instruct-2507",
+        ]
+
         return [
             ModelConfig(
-                model_name=self.model_name,
+                model_name=model_name,
                 litellm_params={
-                    "model": f"tinker/{self.model_name}",
+                    "model": f"tinker/{model_name}",
                 },
                 tpm=1_000_000,
                 rpm=1_000,
-            ),
+            )
+            for model_name in model_names
         ]
 
-    def rewrite_litellm_custom_providers(self) -> Self:
+    @classmethod
+    def rewrite_litellm_custom_providers(cls):
+        instance = cls()
+        instance._rewrite_litellm_custom_providers()
+
+    def _rewrite_litellm_custom_providers(self) -> Self:
         """Register this TinkerLLM as a custom provider in LiteLLM.
 
         !!! warning
