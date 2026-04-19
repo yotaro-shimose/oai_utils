@@ -76,8 +76,8 @@ class AgentWrapper[TOutput: BaseModel | str]:
     def create(
         cls,
         name: str,
-        instructions: str,
         model: AgentsSDKModel,
+        instructions: str | None = None,
         model_settings: ModelSettings | None = None,
         mcp_servers: list[MCPServer] | None = None,
         output_type: type[TOutput] | None = None,
